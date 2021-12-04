@@ -3,8 +3,9 @@ import logging
 import operator
 import json
 import itertools
-import http.client
+import requests
 import urllib.parse
+from bs4 import BeautifulSoup
 
 import voluptuous as vol
 
@@ -20,7 +21,7 @@ import homeassistant.helpers.config_validation as cv
 __version__ = '0.0.2'
 
 _LOGGER = logging.getLogger(__name__)
-_RESOURCE = 'app.greenchoice.nl'
+_RESOURCE = 'mijn.greenchoice.nl'
 
 CONF_OVEREENKOMST_ID = 'overeenkomst_id'
 CONF_USERNAME = 'username'
@@ -35,7 +36,7 @@ ATTR_ICON = 'icon'
 ATTR_MEASUREMENT_DATE = 'date'
 ATTR_UNIT_OF_MEASUREMENT = 'unit_of_measurement'
 
-MIN_TIME_BETWEEN_UPDATES = timedelta(seconds=3600)
+MIN_TIME_BETWEEN_UPDATES = timedelta(seconds=1800)
 
 PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
     vol.Optional(CONF_NAME, default=DEFAULT_NAME): cv.string,
@@ -60,15 +61,17 @@ def setup_platform(hass, config, add_entities, discovery_info=None):
         raise PlatformNotReady
 
     sensors = []
-    sensors.append(GreenchoiceSensor(greenchoice_api, name, overeenkomst_id, username, password, "currentGas"))
-    sensors.append(GreenchoiceSensor(greenchoice_api, name, overeenkomst_id, username, password, "currentEnergyDay"))
-    sensors.append(GreenchoiceSensor(greenchoice_api, name, overeenkomst_id, username, password, "currentEnergyNight"))
-    sensors.append(GreenchoiceSensor(greenchoice_api, name, overeenkomst_id, username, password, "currentEnergyTotal"))
+    sensors.append(GreenchoiceSensor(greenchoice_api, name, overeenkomst_id, username, password, "costEnergyKwh"))
+    sensors.append(GreenchoiceSensor(greenchoice_api, name, overeenkomst_id, username, password, "costEnergyDailyBase"))
+    sensors.append(GreenchoiceSensor(greenchoice_api, name, overeenkomst_id, username, password, "costGasM3"))
+    sensors.append(GreenchoiceSensor(greenchoice_api, name, overeenkomst_id, username, password, "costGasDailyBase"))
+    sensors.append(GreenchoiceSensor(greenchoice_api, name, overeenkomst_id, username, password, "usageEnergyTotal"))
+    sensors.append(GreenchoiceSensor(greenchoice_api, name, overeenkomst_id, username, password, "usageGasTotal"))
     add_entities(sensors, True)
 
 
 class GreenchoiceSensor(Entity):
-    def __init__(self, greenchoice_api, name, overeenkomst_id, username, password, measurement_type,):
+    def __init__(self, greenchoice_api, name, overeenkomst_id, username, password, measurement_type):
         self._json_data = greenchoice_api
         self._name = name
         self._overeenkomst_id = overeenkomst_id
@@ -79,6 +82,8 @@ class GreenchoiceSensor(Entity):
         self._unit_of_measurement = None
         self._state = None
         self._icon = None
+        self._device_class = None
+        self._state_class = None
 
     @property
     def name(self):
@@ -116,14 +121,14 @@ class GreenchoiceSensor(Entity):
     @property
     def unit_of_measurement(self):
         return self._unit_of_measurement
-        
+
     @property
-    def device_state_attributes(self):
-        """Return the state attributes."""
-        return{
-            ATTR_MEASUREMENT_DATE: self._measurement_date,
-            ATTR_UNIT_OF_MEASUREMENT: self._unit_of_measurement
-        }
+    def device_class(self):
+        return self._device_class
+
+    @property
+    def state_class(self):
+        return self._state_class
 
     def update(self):
         """Get the latest data from the Greenchoice API."""
@@ -142,82 +147,202 @@ class GreenchoiceSensor(Entity):
             self._state = STATE_UNKNOWN
         else:
             self._state = data[self._measurement_type]
-            self._measurement_date = data["measurementDate"]
+            self._measurement_date = datetime.now()
           
-        if self._measurement_type == "currentEnergyNight":
-            self._icon = 'mdi:weather-sunset-down'
-            self._name = 'currentEnergyNight'
-            self._unit_of_measurement = "kWh"
-        if self._measurement_type == "currentEnergyDay":
-            self._icon = 'mdi:weather-sunset-up'
-            self._name = 'currentEnergyDay'
-            self._unit_of_measurement = "kWh"
-        if self._measurement_type == "currentEnergyTotal":
-            self._icon = 'mdi:power-plug'
-            self._name = 'currentEnergyTotal'
-            self._unit_of_measurement = "kWh"
-        if self._measurement_type == "currentGas":
-            self._icon = 'mdi:fire'
-            self._name = 'currentGas'
-            self._unit_of_measurement = "m³"
+        if self._measurement_type == "costEnergyKwh":
+            self._icon = 'mdi:currency-eur'
+            self._name = 'costEnergyKwh'
+            self._device_class = 'monetary'
+            self._unit_of_measurement = "€"
+        if self._measurement_type == "costEnergyDailyBase":
+            self._icon = 'mdi:currency-eur'
+            self._name = 'costEnergyDailyBase'
+            self._device_class = 'monetary'
+            self._unit_of_measurement = "€"
+        if self._measurement_type == "costGasM3":
+            self._icon = 'mdi:currency-eur'
+            self._name = 'costGasM³'
+            self._device_class = 'monetary'
+            self._unit_of_measurement = "€"
+        if self._measurement_type == "costGasDailyBase":
+            self._icon = 'mdi:currency-eur'
+            self._name = 'costGasDailyBase'
+            self._device_class = 'monetary'
+            self._unit_of_measurement = "€"
 
+        if self._measurement_type == "usageEnergyTotal":
+            self._icon = 'mdi:lightning-bolt'
+            self._name = 'usageEnergyTotal'
+            self._device_class = 'energy'
+            self._unit_of_measurement = "kWh"
+            self._state_class = "total_increasing"
+        if self._measurement_type == "usageGasTotal":
+            self._icon = 'mdi:fire'
+            self._name = 'usageGasTotal'
+            self._device_class = 'gas'
+            self._unit_of_measurement = "m³"
+            self._state_class = "total_increasing"
 
 class GreenchoiceApiData:
     def __init__(self, overeenkomst_id, username, password):
-        self._resource = _RESOURCE
         self._overeenkomst_id = overeenkomst_id
+        self._username = username
+        self._password = password
         self.result = {}
-        self.token = ""
-        self._tokenheaders = {
-            'Content-Type': "application/x-www-form-urlencoded",
-            'User-Agent': "Mozilla/5.0 (iPhone; CPU iPhone OS 5_0 like Mac OS X) AppleWebKit/534.46 (KHTML, like Gecko) Version/5.1 Mobile/9A334 Safari/7534.48.3",
-            'Host': "app.greenchoice.nl"
-        }
-        self._tokenquery = urllib.parse.urlencode({
-            'grant_type': 'password',
-            'client_id': 'MobileApp',
-            'client_secret': 'A6E60EBF73521F57',
-            'username': username,
-            'password': password,
-        })
 
-    @Throttle(MIN_TIME_BETWEEN_UPDATES)
+    # @Throttle(MIN_TIME_BETWEEN_UPDATES)
     def update(self):
+        session = requests.Session()
         self.result = {}
-
+        
+        """ Get session parameters and verification token """
         try:
-            response = http.client.HTTPSConnection(self._resource, timeout=10)
-            response.request("POST", "/token", body = self._tokenquery, headers = self._tokenheaders)
-            json_result = json.loads(response.getresponse().read().decode('utf-8'))
-            _LOGGER.debug("token json_response=%s", json_result)
+            url = "https://mijn.greenchoice.nl/contract/levering"
+            headers={}
+            payload={}
+            response = session.get(url, headers=headers, data=payload)
 
-            if "access_token" in json_result and "error" not in json_result:
-                self.token = json_result["access_token"]
-
+            parsed_html = BeautifulSoup(response.text, 'html.parser')
+            returnUrl = urllib.parse.unquote(parsed_html.find('input', attrs={"id": "ReturnUrl"})['value'])
+            sessionParameters = {x[0] : x[1] for x in [x.split("=") for x in returnUrl.split('?')[1].split("&")]}
+            verificationToken = parsed_html.find('input', attrs={"name": "__RequestVerificationToken"})['value']
+            
+            _LOGGER.debug(f'sessionParameters: {sessionParameters}\nverificationToken: {verificationToken}')
+            
+            if verificationToken is not None and returnUrl is not None:
+                
+                """ Send login request """
                 try:
-                    response = http.client.HTTPSConnection(self._resource, timeout=10)
-                    response.request("GET", "/api/v2/meterstanden/getstanden?overeenkomstid=" + self._overeenkomst_id, headers = {'Authorization': "Bearer "+self.token})
-                    json_result = json.loads(response.getresponse().read().decode('utf-8'))
-                    _LOGGER.debug("getstanden json_response=%s", json_result)
+                    url = "https://sso.greenchoice.nl/Account/Login"
+                    payload={
+                        'ReturnUrl': '/connect/authorize/callback',
+                        'Username': self._username,
+                        'Password': self._password,
+                        '__RequestVerificationToken': verificationToken,
+                    }
+                    headers = {'content-type': 'application/x-www-form-urlencoded'}
+                    response = session.post(url, headers=headers, data=payload)
+                    
+                    """ Get credentials """
+                    try:
+                        url = "https://sso.greenchoice.nl/connect/authorize/callback"
+                        payload={
+                            'client_id': sessionParameters["client_id"],
+                            'redirect_uri': sessionParameters["redirect_uri"],
+                            'response_type': sessionParameters["response_type"],
+                            'scope': sessionParameters["scope"],
+                        }
+                        headers = {}
+                        response = session.get(url, headers=headers, params=payload)
+                        parsed_html = BeautifulSoup(response.text, 'html.parser')
+                        CRED_code = parsed_html.find('input', attrs={"name": "code"})['value']
+                        CRED_state = parsed_html.find('input', attrs={"name": "state"})['value']
+                        CRED_session_state = parsed_html.find('input', attrs={"name": "session_state"})['value']
+                        
+                        _LOGGER.debug(f'CRED_code: {CRED_code}\nCRED_state: {CRED_state}\nCRED_session_state: {CRED_session_state}')
+                        
+                        if CRED_code is not None and CRED_state is not None and CRED_session_state is not None:
+                            
+                            """ Sign in using credentials """
+                            try:
+                                url = 'https://mijn.greenchoice.nl/signin-oidc'
+                                payload={
+                                    'code': CRED_code,
+                                    'state': CRED_state,
+                                    'session_state': CRED_session_state
+                                }
+                                headers = {}
+                                response = session.post(url, headers=headers, data=payload)
+                                
+                                """ Get price data """
+                                try:
+                                    url = "https://mijn.greenchoice.nl/microbus/request"
+                                    payload = json.dumps({
+                                        "name":"GetTariefOvereenkomst",
+                                        "message":{
+                                            "overeenkomstId": self._overeenkomst_id
+                                            }
+                                        })
+                                    headers = {'content-type': 'application/json;charset=UTF-8'}
+                                    response = session.post(url, headers=headers, data=payload)
+                                    returnData = json.loads(response.text)
+                                    self.result["costEnergyKwh"] = returnData["stroom"]["leveringEnkelAllin"]
+                                    self.result["costEnergyDailyBase"] = returnData["stroom"]["vastrechtPerDagIncBtw"] + returnData["stroom"]["netbeheerPerDagIncBtw"] - (returnData["stroom"]["rebTeruggaveIncBtw"] / returnData["stroom"]["daysInYear"])
+                                    self.result["costGasM3"] = returnData["gas"]["leveringAllin"]
+                                    self.result["costGasDailyBase"] = returnData["gas"]["vastrechtPerDagIncBtw"] + returnData["gas"]["netbeheerPerDagIncBtw"]
+                                    
+                                    _LOGGER.debug(f'costEnergyKwh: {self.result["costEnergyKwh"]}\ncostEnergyDailyBase: {self.result["costEnergyDailyBase"]}\ncostGasM3: {self.result["costGasM3"]}\ncostGasDailyBase: {self.result["costGasDailyBase"]}')
+                                    
+                                except requests.exceptions.RequestException as e:
+                                    self.result = f'Unable to get price data.\n{e}'
+                                    _LOGGER.error(self.result)
+                                
+                                
+                                """ Get Energy usage data """
+                                try:
+                                    url = "https://mijn.greenchoice.nl/microbus/request"
+                                    payload = json.dumps({
+                                        "name":"ProductkostenOphalenRequest",
+                                        "message":{
+                                            "productType": 1,
+                                            "periodeType": 1,
+                                            "jaar": int(datetime.now().strftime("%Y"))
+                                            }
+                                        })
+                                    headers = {'content-type': 'application/json;charset=UTF-8'}
+                                    response = session.post(url, headers=headers, data=payload)
+                                    returnData = json.loads(response.text)
+                                    self.result["usageEnergyTotal"] = returnData["series"][0]["values"][datetime.now().strftime("%Y")]
+                                    
+                                    _LOGGER.debug(f'usageEnergyTotal: {self.result["usageEnergyTotal"]}')
+                                    
+                                except requests.exceptions.RequestException as e:
+                                    self.result = f'Unable to get Energy usage data.\n{e}'
+                                    _LOGGER.error(self.result)
+                                
+                                
+                                """ Get Gas usage data """
+                                try:
+                                    url = "https://mijn.greenchoice.nl/microbus/request"
+                                    payload = json.dumps({
+                                        "name":"ProductkostenOphalenRequest",
+                                        "message":{
+                                            "productType": 2,
+                                            "periodeType": 1,
+                                            "jaar": int(datetime.now().strftime("%Y"))
+                                            }
+                                        })
+                                    headers = {'content-type': 'application/json;charset=UTF-8'}
+                                    response = session.post(url, headers=headers, data=payload)
+                                    returnData = json.loads(response.text)
+                                    self.result["usageGasTotal"] = returnData["series"][0]["values"][datetime.now().strftime("%Y")]
+                                    
+                                except requests.exceptions.RequestException as e:
+                                    self.result = f'Unable to get Gas usage data.\n{e}'
+                                    _LOGGER.error(self.result)
+                                
+                            except requests.exceptions.RequestException as e:
+                                self.result = f'Unable to send credentials to login page.\n{e}'
+                                _LOGGER.error(self.result)
 
-                    currentEnergy = [x for x in json_result if x['MeterstandenOutput'][0]['Product'] == 1]
-                    currentGas = [x for x in json_result if x['MeterstandenOutput'][0]['Product'] == 3]
-                    self.result["currentEnergyNight"] = 0 if len(currentEnergy) == 0 else currentEnergy[0]["MeterstandenOutput"][0]["Laag"]
-                    self.result["currentEnergyDay"] = 0 if len(currentEnergy) == 0 else currentEnergy[0]["MeterstandenOutput"][0]["Hoog"]
-                    self.result["currentEnergyTotal"] = 0 if len(currentEnergy) == 0 else currentEnergy[0]["MeterstandenOutput"][0]["Hoog"] + currentEnergy[0]["MeterstandenOutput"][0]["Laag"]
-                    self.result["currentGas"] = 0 if len(currentGas) == 0 else currentGas[0]["MeterstandenOutput"][0]["Hoog"]
-                    self.result["measurementDate"] = json_result[0]["DatumInvoer"]
-                except http.client.HTTPException:
-                    _LOGGER.error("Could not retrieve current numbers.")
-                    self.result = "Could not retrieve current numbers."
+                        else:
+                            self.result = f'Could not parse credentials from response.'
+                            _LOGGER.error(self.result)
+                        
+                    except requests.exceptions.RequestException as e:
+                        self.result = f'Unable to get credentials response.\n{e}'
+                        _LOGGER.error(self.result)
+ 
+                except requests.exceptions.RequestException as e:
+                    self.result = f'Unable to send login request.\n{e}'
+                    _LOGGER.error(self.result)
+                    
             else:
-                if "error_description" in json_result:
-                    error_description = json_result["error_description"]
-                else:
-                    error_description = "unknown"
-                self.result = f"Could not retrieve token ({error_description})."
+                self.result = f'Could not parse verification token and session parameters from response.'
                 _LOGGER.error(self.result)
 
-        except http.client.HTTPException:
-            _LOGGER.error("Could not retrieve token.")
-            self.result = "Could not retrieve token."
+        except requests.exceptions.RequestException as e:
+            self.result = f'Could not start session.\n{e}'
+            _LOGGER.error(self.result)
+        
+        session.close()
