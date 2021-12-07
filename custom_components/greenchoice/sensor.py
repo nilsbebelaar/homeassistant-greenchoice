@@ -148,36 +148,36 @@ class GreenchoiceSensor(SensorEntity):
             self._state = data[self._measurement_type]
             self._measurement_date = datetime.now()
 
-        if self._measurement_type == "costEnergyKwh":
+        if self._measurement_type == "cost_energy_kwh":
             self._icon = 'mdi:currency-eur'
-            self._name = 'costEnergyKwh'
+            self._name = 'Energy Costs per kWh'
             self._device_class = 'monetary'
             self._unit_of_measurement = "€"
-        if self._measurement_type == "costEnergyDailyBase":
+        if self._measurement_type == "cost_energy_daily_base":
             self._icon = 'mdi:currency-eur'
-            self._name = 'costEnergyDailyBase'
+            self._name = 'Energy Costs daily base'
             self._device_class = 'monetary'
             self._unit_of_measurement = "€"
-        if self._measurement_type == "costGasM3":
+        if self._measurement_type == "cost_gas_m3":
             self._icon = 'mdi:currency-eur'
-            self._name = 'costGasM³'
+            self._name = 'Gas Costs per m³'
             self._device_class = 'monetary'
             self._unit_of_measurement = "€"
-        if self._measurement_type == "costGasDailyBase":
+        if self._measurement_type == "cost_gas_daily_base":
             self._icon = 'mdi:currency-eur'
-            self._name = 'costGasDailyBase'
+            self._name = 'Gas Costs daily base'
             self._device_class = 'monetary'
             self._unit_of_measurement = "€"
 
-        if self._measurement_type == "usageEnergyTotal":
+        if self._measurement_type == "usage_energy_total":
             self._icon = 'mdi:lightning-bolt'
-            self._name = 'usageEnergyTotal'
+            self._name = 'Total Energy Usage'
             self._device_class = 'energy'
             self._unit_of_measurement = "kWh"
             self._attr_state_class = "total_increasing"
-        if self._measurement_type == "usageGasTotal":
+        if self._measurement_type == "usage_gas_total":
             self._icon = 'mdi:fire'
-            self._name = 'usageGasTotal'
+            self._name = 'Total Gas Usage'
             self._device_class = 'gas'
             self._unit_of_measurement = "m³"
             self._attr_state_class = "total_increasing"
@@ -285,12 +285,12 @@ class GreenchoiceApiData:
                                         headers = {'content-type': 'application/json;charset=UTF-8'}
                                         response = session.post(url, headers=headers, data=payload)
                                         returnData = json.loads(response.text)
-                                        self.result["costEnergyKwh"] = returnData["stroom"]["leveringEnkelAllin"]
-                                        self.result["costEnergyDailyBase"] = returnData["stroom"]["vastrechtPerDagIncBtw"] + returnData["stroom"]["netbeheerPerDagIncBtw"] - (returnData["stroom"]["rebTeruggaveIncBtw"] / returnData["stroom"]["daysInYear"])
-                                        self.result["costGasM3"] = returnData["gas"]["leveringAllin"]
-                                        self.result["costGasDailyBase"] = returnData["gas"]["vastrechtPerDagIncBtw"] + returnData["gas"]["netbeheerPerDagIncBtw"]
+                                        self.result["cost_energy_kwh"] = returnData["stroom"]["leveringEnkelAllin"]
+                                        self.result["cost_energy_daily_base"] = returnData["stroom"]["vastrechtPerDagIncBtw"] + returnData["stroom"]["netbeheerPerDagIncBtw"] - (returnData["stroom"]["rebTeruggaveIncBtw"] / returnData["stroom"]["daysInYear"])
+                                        self.result["cost_gas_m3"] = returnData["gas"]["leveringAllin"]
+                                        self.result["cost_gas_daily_base"] = returnData["gas"]["vastrechtPerDagIncBtw"] + returnData["gas"]["netbeheerPerDagIncBtw"]
 
-                                        _LOGGER.debug(f'costEnergyKwh: {self.result["costEnergyKwh"]}\ncostEnergyDailyBase: {self.result["costEnergyDailyBase"]}\ncostGasM3: {self.result["costGasM3"]}\ncostGasDailyBase: {self.result["costGasDailyBase"]}')
+                                        _LOGGER.debug(f'cost_energy_kwh: {self.result["cost_energy_kwh"]}\ncost_energy_daily_base: {self.result["cost_energy_daily_base"]}\ncost_gas_m3: {self.result["cost_gas_m3"]}\ncost_gas_daily_base: {self.result["cost_gas_daily_base"]}')
 
                                     except requests.exceptions.RequestException as e:
                                         self.result = f'Unable to get price data.\n{e}'
@@ -310,9 +310,9 @@ class GreenchoiceApiData:
                                         headers = {'content-type': 'application/json;charset=UTF-8'}
                                         response = session.post(url, headers=headers, data=payload)
                                         returnData = json.loads(response.text)
-                                        self.result["usageEnergyTotal"] = returnData["series"][0]["values"][datetime.now().strftime("%Y")]
+                                        self.result["usage_energy_total"] = returnData["series"][0]["values"][datetime.now().strftime("%Y")]
 
-                                        _LOGGER.debug(f'usageEnergyTotal: {self.result["usageEnergyTotal"]}')
+                                        _LOGGER.debug(f'usage_energy_total: {self.result["usage_energy_total"]}')
 
                                     except requests.exceptions.RequestException as e:
                                         self.result = f'Unable to get Energy usage data.\n{e}'
@@ -332,7 +332,7 @@ class GreenchoiceApiData:
                                         headers = {'content-type': 'application/json;charset=UTF-8'}
                                         response = session.post(url, headers=headers, data=payload)
                                         returnData = json.loads(response.text)
-                                        self.result["usageGasTotal"] = returnData["series"][0]["values"][datetime.now().strftime("%Y")]
+                                        self.result["usage_gas_total"] = returnData["series"][0]["values"][datetime.now().strftime("%Y")]
 
                                     except requests.exceptions.RequestException as e:
                                         self.result = f'Unable to get Gas usage data.\n{e}'
