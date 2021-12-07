@@ -50,7 +50,7 @@ Setup the component by adding the following to `configuration.yaml`:
       source: sensor.total_gas_usage
       name: Daily Gas Usage
       cycle: daily
-    ```
+  ```
 
 2. Create a template that multiplies the daily usage by the price per kWh or m³, and add the daily base price:
 
