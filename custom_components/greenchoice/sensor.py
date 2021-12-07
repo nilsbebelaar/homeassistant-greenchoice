@@ -9,11 +9,10 @@ from bs4 import BeautifulSoup
 
 import voluptuous as vol
 
-from homeassistant.components.sensor import PLATFORM_SCHEMA
+from homeassistant.components.sensor import PLATFORM_SCHEMA, SensorEntity
 from homeassistant.const import (CONF_NAME, STATE_UNKNOWN)
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.exceptions import PlatformNotReady
-from homeassistant.helpers.entity import Entity
 from homeassistant.util import Throttle
 
 import homeassistant.helpers.config_validation as cv
@@ -21,7 +20,6 @@ import homeassistant.helpers.config_validation as cv
 __version__ = '0.0.2'
 
 _LOGGER = logging.getLogger(__name__)
-_RESOURCE = 'mijn.greenchoice.nl'
 
 CONF_OVEREENKOMST_ID = 'overeenkomst_id'
 CONF_USERNAME = 'username'
@@ -42,12 +40,11 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
     vol.Optional(CONF_NAME, default=DEFAULT_NAME): cv.string,
     vol.Optional(CONF_USERNAME, default=CONF_USERNAME): cv.string,
     vol.Optional(CONF_PASSWORD, default=CONF_USERNAME): cv.string,
-    vol.Optional(CONF_OVEREENKOMST_ID, default=CONF_OVEREENKOMST_ID): cv.string,
+    vol.Optional(CONF_OVEREENKOMST_ID, default=''): cv.string,
 })
 
 
 def setup_platform(hass, config, add_entities, discovery_info=None):
-
     name = config.get(CONF_NAME)
     overeenkomst_id = config.get(CONF_OVEREENKOMST_ID)
     username = config.get(CONF_USERNAME)
@@ -60,17 +57,19 @@ def setup_platform(hass, config, add_entities, discovery_info=None):
     if greenchoice_api is None:
         raise PlatformNotReady
 
-    sensors = []
-    sensors.append(GreenchoiceSensor(greenchoice_api, name, overeenkomst_id, username, password, "costEnergyKwh"))
-    sensors.append(GreenchoiceSensor(greenchoice_api, name, overeenkomst_id, username, password, "costEnergyDailyBase"))
-    sensors.append(GreenchoiceSensor(greenchoice_api, name, overeenkomst_id, username, password, "costGasM3"))
-    sensors.append(GreenchoiceSensor(greenchoice_api, name, overeenkomst_id, username, password, "costGasDailyBase"))
-    sensors.append(GreenchoiceSensor(greenchoice_api, name, overeenkomst_id, username, password, "usageEnergyTotal"))
-    sensors.append(GreenchoiceSensor(greenchoice_api, name, overeenkomst_id, username, password, "usageGasTotal"))
-    add_entities(sensors, True)
+    if not greenchoice_api.result:
+        _LOGGER.error(f'No results found from data request.')
+        if greenchoice_api._found_overeenkomst_id:
+            _LOGGER.error(f'Found overeenkomst_ids:\n{greenchoice_api._found_overeenkomst_id}')
+
+    else:
+        sensors = []
+        for entityName in greenchoice_api.result:
+            sensors.append(GreenchoiceSensor(greenchoice_api, name, overeenkomst_id, username, password, entityName))
+        add_entities(sensors, True)
 
 
-class GreenchoiceSensor(Entity):
+class GreenchoiceSensor(SensorEntity):
     def __init__(self, greenchoice_api, name, overeenkomst_id, username, password, measurement_type):
         self._json_data = greenchoice_api
         self._name = name
@@ -119,8 +118,8 @@ class GreenchoiceSensor(Entity):
         return self._measurement_date
 
     @property
-    def state_class(self):
-        return self._state_class
+    def attr_state_class(self):
+        return self._attr_state_class
 
     @property
     def unit_of_measurement(self):
@@ -141,7 +140,7 @@ class GreenchoiceSensor(Entity):
         elif self._password == CONF_PASSWORD or self._password is None:
             _LOGGER.error("Need a password!")
         elif self._overeenkomst_id == CONF_OVEREENKOMST_ID or self._overeenkomst_id is None:
-            _LOGGER.error("Need a overeenkomst id (see docs how to get one)!")
+            _LOGGER.error("Need a overeenkomst id (Check the logs for found ids)!")
 
         if data is None or self._measurement_type not in data:
             self._state = STATE_UNKNOWN
@@ -175,13 +174,13 @@ class GreenchoiceSensor(Entity):
             self._name = 'usageEnergyTotal'
             self._device_class = 'energy'
             self._unit_of_measurement = "kWh"
-            self._state_class = "total_increasing"
+            self._attr_state_class = "total_increasing"
         if self._measurement_type == "usageGasTotal":
             self._icon = 'mdi:fire'
             self._name = 'usageGasTotal'
             self._device_class = 'gas'
             self._unit_of_measurement = "m³"
-            self._state_class = "total_increasing"
+            self._attr_state_class = "total_increasing"
 
 
 class GreenchoiceApiData:
@@ -189,9 +188,10 @@ class GreenchoiceApiData:
         self._overeenkomst_id = overeenkomst_id
         self._username = username
         self._password = password
+        self._found_overeenkomst_id = []
         self.result = {}
 
-    # @Throttle(MIN_TIME_BETWEEN_UPDATES)
+    @Throttle(MIN_TIME_BETWEEN_UPDATES)
     def update(self):
         session = requests.Session()
         self.result = {}
@@ -255,70 +255,88 @@ class GreenchoiceApiData:
                                 headers = {}
                                 response = session.post(url, headers=headers, data=payload)
 
-                                """ Get price data """
-                                try:
-                                    url = "https://mijn.greenchoice.nl/microbus/request"
-                                    payload = json.dumps({
-                                        "name": "GetTariefOvereenkomst",
-                                        "message": {
-                                            "overeenkomstId": self._overeenkomst_id
-                                        }
-                                    })
-                                    headers = {'content-type': 'application/json;charset=UTF-8'}
-                                    response = session.post(url, headers=headers, data=payload)
-                                    returnData = json.loads(response.text)
-                                    self.result["costEnergyKwh"] = returnData["stroom"]["leveringEnkelAllin"]
-                                    self.result["costEnergyDailyBase"] = returnData["stroom"]["vastrechtPerDagIncBtw"] + returnData["stroom"]["netbeheerPerDagIncBtw"] - (returnData["stroom"]["rebTeruggaveIncBtw"] / returnData["stroom"]["daysInYear"])
-                                    self.result["costGasM3"] = returnData["gas"]["leveringAllin"]
-                                    self.result["costGasDailyBase"] = returnData["gas"]["vastrechtPerDagIncBtw"] + returnData["gas"]["netbeheerPerDagIncBtw"]
+                                if self._overeenkomst_id == '':
+                                    """ Get overeenkomst_id """
+                                    try:
+                                        url = "https://mijn.greenchoice.nl/microbus/init"
+                                        payload = {}
+                                        headers = {}
+                                        response = session.get(url, headers=headers, data=payload)
+                                        returnData = json.loads(response.text)
 
-                                    _LOGGER.debug(f'costEnergyKwh: {self.result["costEnergyKwh"]}\ncostEnergyDailyBase: {self.result["costEnergyDailyBase"]}\ncostGasM3: {self.result["costGasM3"]}\ncostGasDailyBase: {self.result["costGasDailyBase"]}')
+                                        for address in returnData["klantgegevens"][0]["adressen"]:
+                                            self._found_overeenkomst_id.append(f'overeenkomst_id: {address["overeenkomstId"]} at {address["straat"]} {address["huisnummer"]}')
+                                        _LOGGER.debug(f'Found following overeenkomst_ids:\n{self._found_overeenkomst_id}')
 
-                                except requests.exceptions.RequestException as e:
-                                    self.result = f'Unable to get price data.\n{e}'
-                                    _LOGGER.error(self.result)
+                                    except requests.exceptions.RequestException as e:
+                                        self.result = f'Unable to get overeenkomst_id.\n{e}'
+                                        _LOGGER.error(self.result)
 
-                                """ Get Energy usage data """
-                                try:
-                                    url = "https://mijn.greenchoice.nl/microbus/request"
-                                    payload = json.dumps({
-                                        "name": "ProductkostenOphalenRequest",
-                                        "message": {
-                                            "productType": 1,
-                                            "periodeType": 1,
-                                            "jaar": int(datetime.now().strftime("%Y"))
-                                        }
-                                    })
-                                    headers = {'content-type': 'application/json;charset=UTF-8'}
-                                    response = session.post(url, headers=headers, data=payload)
-                                    returnData = json.loads(response.text)
-                                    self.result["usageEnergyTotal"] = returnData["series"][0]["values"][datetime.now().strftime("%Y")]
+                                else:
+                                    """ Get price data """
+                                    try:
+                                        url = "https://mijn.greenchoice.nl/microbus/request"
+                                        payload = json.dumps({
+                                            "name": "GetTariefOvereenkomst",
+                                            "message": {
+                                                "overeenkomstId": self._overeenkomst_id
+                                            }
+                                        })
+                                        headers = {'content-type': 'application/json;charset=UTF-8'}
+                                        response = session.post(url, headers=headers, data=payload)
+                                        returnData = json.loads(response.text)
+                                        self.result["costEnergyKwh"] = returnData["stroom"]["leveringEnkelAllin"]
+                                        self.result["costEnergyDailyBase"] = returnData["stroom"]["vastrechtPerDagIncBtw"] + returnData["stroom"]["netbeheerPerDagIncBtw"] - (returnData["stroom"]["rebTeruggaveIncBtw"] / returnData["stroom"]["daysInYear"])
+                                        self.result["costGasM3"] = returnData["gas"]["leveringAllin"]
+                                        self.result["costGasDailyBase"] = returnData["gas"]["vastrechtPerDagIncBtw"] + returnData["gas"]["netbeheerPerDagIncBtw"]
 
-                                    _LOGGER.debug(f'usageEnergyTotal: {self.result["usageEnergyTotal"]}')
+                                        _LOGGER.debug(f'costEnergyKwh: {self.result["costEnergyKwh"]}\ncostEnergyDailyBase: {self.result["costEnergyDailyBase"]}\ncostGasM3: {self.result["costGasM3"]}\ncostGasDailyBase: {self.result["costGasDailyBase"]}')
 
-                                except requests.exceptions.RequestException as e:
-                                    self.result = f'Unable to get Energy usage data.\n{e}'
-                                    _LOGGER.error(self.result)
+                                    except requests.exceptions.RequestException as e:
+                                        self.result = f'Unable to get price data.\n{e}'
+                                        _LOGGER.error(self.result)
 
-                                """ Get Gas usage data """
-                                try:
-                                    url = "https://mijn.greenchoice.nl/microbus/request"
-                                    payload = json.dumps({
-                                        "name": "ProductkostenOphalenRequest",
-                                        "message": {
-                                            "productType": 2,
-                                            "periodeType": 1,
-                                            "jaar": int(datetime.now().strftime("%Y"))
-                                        }
-                                    })
-                                    headers = {'content-type': 'application/json;charset=UTF-8'}
-                                    response = session.post(url, headers=headers, data=payload)
-                                    returnData = json.loads(response.text)
-                                    self.result["usageGasTotal"] = returnData["series"][0]["values"][datetime.now().strftime("%Y")]
+                                    """ Get Energy usage data """
+                                    try:
+                                        url = "https://mijn.greenchoice.nl/microbus/request"
+                                        payload = json.dumps({
+                                            "name": "ProductkostenOphalenRequest",
+                                            "message": {
+                                                "productType": 1,
+                                                "periodeType": 1,
+                                                "jaar": int(datetime.now().strftime("%Y"))
+                                            }
+                                        })
+                                        headers = {'content-type': 'application/json;charset=UTF-8'}
+                                        response = session.post(url, headers=headers, data=payload)
+                                        returnData = json.loads(response.text)
+                                        self.result["usageEnergyTotal"] = returnData["series"][0]["values"][datetime.now().strftime("%Y")]
 
-                                except requests.exceptions.RequestException as e:
-                                    self.result = f'Unable to get Gas usage data.\n{e}'
-                                    _LOGGER.error(self.result)
+                                        _LOGGER.debug(f'usageEnergyTotal: {self.result["usageEnergyTotal"]}')
+
+                                    except requests.exceptions.RequestException as e:
+                                        self.result = f'Unable to get Energy usage data.\n{e}'
+                                        _LOGGER.error(self.result)
+
+                                    """ Get Gas usage data """
+                                    try:
+                                        url = "https://mijn.greenchoice.nl/microbus/request"
+                                        payload = json.dumps({
+                                            "name": "ProductkostenOphalenRequest",
+                                            "message": {
+                                                "productType": 2,
+                                                "periodeType": 1,
+                                                "jaar": int(datetime.now().strftime("%Y"))
+                                            }
+                                        })
+                                        headers = {'content-type': 'application/json;charset=UTF-8'}
+                                        response = session.post(url, headers=headers, data=payload)
+                                        returnData = json.loads(response.text)
+                                        self.result["usageGasTotal"] = returnData["series"][0]["values"][datetime.now().strftime("%Y")]
+
+                                    except requests.exceptions.RequestException as e:
+                                        self.result = f'Unable to get Gas usage data.\n{e}'
+                                        _LOGGER.error(self.result)
 
                             except requests.exceptions.RequestException as e:
                                 self.result = f'Unable to send credentials to login page.\n{e}'
