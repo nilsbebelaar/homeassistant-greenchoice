@@ -52,24 +52,28 @@ Setup the component by adding the following to `configuration.yaml`:
       cycle: daily
   ```
 
-2. Create a template that multiplies the daily usage by the price per kWh or m³, and add the daily base price:
+2. Create a template that multiplies the daily usage by the price per kWh or m³, and add the daily base price. The template first checks if all three data are available, to avoid errors and wrong measurements logged to the Dashboard.
 
   ```YAML
   template:
     sensor:
-     - name: "Daily Energy Costs"
-       state_class: total_increasing
-       device_class: monetary
-       unit_of_measurement: '€'
-       state: >
-          {{(float(states('sensor.daily_energy_usage'), 0) * float(states('sensor.energy_costs_per_kwh'), 0) + float(states('sensor.energy_costs_daily_base'), 0)) | round(2)}}
+    - name: "Daily Energy Costs"
+      state_class: total_increasing
+      device_class: monetary
+      unit_of_measurement: '€'
+      state: >
+        {% if is_number(states('sensor.daily_energy_usage')) and is_number(states('sensor.energy_costs_per_kwh')) and is_number(states('sensor.energy_costs_daily_base')) %}
+        {{(float(states('sensor.daily_energy_usage')) * float(states('sensor.energy_costs_per_kwh')) + float(states('sensor.energy_costs_daily_base'))) | round(2)}}
+        {%endif%}
 
-     - name: "Daily Gas Costs"
-       state_class: total_increasing
-       device_class: monetary
-       unit_of_measurement: '€'
-       state: >
-          {{(float(states('sensor.daily_gas_usage'), 0) * float(states('sensor.gas_costs_per_m3'), 0) + float(states('sensor.gas_costs_daily_base'), 0)) | round(2)}}
+    - name: "Daily Gas Costs"
+      state_class: total_increasing
+      device_class: monetary
+      unit_of_measurement: '€'
+      state: >
+        {% if is_number(states('sensor.daily_gas_usage')) and is_number(states('sensor.gas_costs_per_m3')) and is_number(states('sensor.gas_costs_daily_base')) %}
+        {{(float(states('sensor.daily_gas_usage')) * float(states('sensor.gas_costs_per_m3')) + float(states('sensor.gas_costs_daily_base'))) | round(2)}}
+        {%endif%}
   ```
 
 #### Energy Usage:
