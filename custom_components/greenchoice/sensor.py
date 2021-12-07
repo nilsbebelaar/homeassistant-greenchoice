@@ -53,7 +53,7 @@ def setup_platform(hass, config, add_entities, discovery_info=None):
     username = config.get(CONF_USERNAME)
     password = config.get(CONF_PASSWORD)
 
-    greenchoice_api = GreenchoiceApiData(overeenkomst_id,username,password)
+    greenchoice_api = GreenchoiceApiData(overeenkomst_id, username, password)
 
     greenchoice_api.update()
 
@@ -108,7 +108,7 @@ class GreenchoiceSensor(Entity):
 
     @property
     def state(self):
-        return self._state   
+        return self._state
 
     @property
     def measurement_type(self):
@@ -119,16 +119,16 @@ class GreenchoiceSensor(Entity):
         return self._measurement_date
 
     @property
+    def state_class(self):
+        return self._state_class
+
+    @property
     def unit_of_measurement(self):
         return self._unit_of_measurement
 
     @property
     def device_class(self):
         return self._device_class
-
-    @property
-    def state_class(self):
-        return self._state_class
 
     def update(self):
         """Get the latest data from the Greenchoice API."""
@@ -148,7 +148,7 @@ class GreenchoiceSensor(Entity):
         else:
             self._state = data[self._measurement_type]
             self._measurement_date = datetime.now()
-          
+
         if self._measurement_type == "costEnergyKwh":
             self._icon = 'mdi:currency-eur'
             self._name = 'costEnergyKwh'
@@ -183,6 +183,7 @@ class GreenchoiceSensor(Entity):
             self._unit_of_measurement = "m³"
             self._state_class = "total_increasing"
 
+
 class GreenchoiceApiData:
     def __init__(self, overeenkomst_id, username, password):
         self._overeenkomst_id = overeenkomst_id
@@ -194,27 +195,27 @@ class GreenchoiceApiData:
     def update(self):
         session = requests.Session()
         self.result = {}
-        
+
         """ Get session parameters and verification token """
         try:
             url = "https://mijn.greenchoice.nl/contract/levering"
-            headers={}
-            payload={}
+            headers = {}
+            payload = {}
             response = session.get(url, headers=headers, data=payload)
 
             parsed_html = BeautifulSoup(response.text, 'html.parser')
             returnUrl = urllib.parse.unquote(parsed_html.find('input', attrs={"id": "ReturnUrl"})['value'])
             sessionParameters = {x[0] : x[1] for x in [x.split("=") for x in returnUrl.split('?')[1].split("&")]}
             verificationToken = parsed_html.find('input', attrs={"name": "__RequestVerificationToken"})['value']
-            
+
             _LOGGER.debug(f'sessionParameters: {sessionParameters}\nverificationToken: {verificationToken}')
-            
+
             if verificationToken is not None and returnUrl is not None:
-                
+
                 """ Send login request """
                 try:
                     url = "https://sso.greenchoice.nl/Account/Login"
-                    payload={
+                    payload = {
                         'ReturnUrl': '/connect/authorize/callback',
                         'Username': self._username,
                         'Password': self._password,
@@ -222,11 +223,11 @@ class GreenchoiceApiData:
                     }
                     headers = {'content-type': 'application/x-www-form-urlencoded'}
                     response = session.post(url, headers=headers, data=payload)
-                    
+
                     """ Get credentials """
                     try:
                         url = "https://sso.greenchoice.nl/connect/authorize/callback"
-                        payload={
+                        payload = {
                             'client_id': sessionParameters["client_id"],
                             'redirect_uri': sessionParameters["redirect_uri"],
                             'response_type': sessionParameters["response_type"],
@@ -238,31 +239,31 @@ class GreenchoiceApiData:
                         CRED_code = parsed_html.find('input', attrs={"name": "code"})['value']
                         CRED_state = parsed_html.find('input', attrs={"name": "state"})['value']
                         CRED_session_state = parsed_html.find('input', attrs={"name": "session_state"})['value']
-                        
+
                         _LOGGER.debug(f'CRED_code: {CRED_code}\nCRED_state: {CRED_state}\nCRED_session_state: {CRED_session_state}')
-                        
+
                         if CRED_code is not None and CRED_state is not None and CRED_session_state is not None:
-                            
+
                             """ Sign in using credentials """
                             try:
                                 url = 'https://mijn.greenchoice.nl/signin-oidc'
-                                payload={
+                                payload = {
                                     'code': CRED_code,
                                     'state': CRED_state,
                                     'session_state': CRED_session_state
                                 }
                                 headers = {}
                                 response = session.post(url, headers=headers, data=payload)
-                                
+
                                 """ Get price data """
                                 try:
                                     url = "https://mijn.greenchoice.nl/microbus/request"
                                     payload = json.dumps({
-                                        "name":"GetTariefOvereenkomst",
-                                        "message":{
+                                        "name": "GetTariefOvereenkomst",
+                                        "message": {
                                             "overeenkomstId": self._overeenkomst_id
-                                            }
-                                        })
+                                        }
+                                    })
                                     headers = {'content-type': 'application/json;charset=UTF-8'}
                                     response = session.post(url, headers=headers, data=payload)
                                     returnData = json.loads(response.text)
@@ -270,57 +271,55 @@ class GreenchoiceApiData:
                                     self.result["costEnergyDailyBase"] = returnData["stroom"]["vastrechtPerDagIncBtw"] + returnData["stroom"]["netbeheerPerDagIncBtw"] - (returnData["stroom"]["rebTeruggaveIncBtw"] / returnData["stroom"]["daysInYear"])
                                     self.result["costGasM3"] = returnData["gas"]["leveringAllin"]
                                     self.result["costGasDailyBase"] = returnData["gas"]["vastrechtPerDagIncBtw"] + returnData["gas"]["netbeheerPerDagIncBtw"]
-                                    
+
                                     _LOGGER.debug(f'costEnergyKwh: {self.result["costEnergyKwh"]}\ncostEnergyDailyBase: {self.result["costEnergyDailyBase"]}\ncostGasM3: {self.result["costGasM3"]}\ncostGasDailyBase: {self.result["costGasDailyBase"]}')
-                                    
+
                                 except requests.exceptions.RequestException as e:
                                     self.result = f'Unable to get price data.\n{e}'
                                     _LOGGER.error(self.result)
-                                
-                                
+
                                 """ Get Energy usage data """
                                 try:
                                     url = "https://mijn.greenchoice.nl/microbus/request"
                                     payload = json.dumps({
-                                        "name":"ProductkostenOphalenRequest",
-                                        "message":{
+                                        "name": "ProductkostenOphalenRequest",
+                                        "message": {
                                             "productType": 1,
                                             "periodeType": 1,
                                             "jaar": int(datetime.now().strftime("%Y"))
-                                            }
-                                        })
+                                        }
+                                    })
                                     headers = {'content-type': 'application/json;charset=UTF-8'}
                                     response = session.post(url, headers=headers, data=payload)
                                     returnData = json.loads(response.text)
                                     self.result["usageEnergyTotal"] = returnData["series"][0]["values"][datetime.now().strftime("%Y")]
-                                    
+
                                     _LOGGER.debug(f'usageEnergyTotal: {self.result["usageEnergyTotal"]}')
-                                    
+
                                 except requests.exceptions.RequestException as e:
                                     self.result = f'Unable to get Energy usage data.\n{e}'
                                     _LOGGER.error(self.result)
-                                
-                                
+
                                 """ Get Gas usage data """
                                 try:
                                     url = "https://mijn.greenchoice.nl/microbus/request"
                                     payload = json.dumps({
-                                        "name":"ProductkostenOphalenRequest",
-                                        "message":{
+                                        "name": "ProductkostenOphalenRequest",
+                                        "message": {
                                             "productType": 2,
                                             "periodeType": 1,
                                             "jaar": int(datetime.now().strftime("%Y"))
-                                            }
-                                        })
+                                        }
+                                    })
                                     headers = {'content-type': 'application/json;charset=UTF-8'}
                                     response = session.post(url, headers=headers, data=payload)
                                     returnData = json.loads(response.text)
                                     self.result["usageGasTotal"] = returnData["series"][0]["values"][datetime.now().strftime("%Y")]
-                                    
+
                                 except requests.exceptions.RequestException as e:
                                     self.result = f'Unable to get Gas usage data.\n{e}'
                                     _LOGGER.error(self.result)
-                                
+
                             except requests.exceptions.RequestException as e:
                                 self.result = f'Unable to send credentials to login page.\n{e}'
                                 _LOGGER.error(self.result)
@@ -328,15 +327,15 @@ class GreenchoiceApiData:
                         else:
                             self.result = f'Could not parse credentials from response.'
                             _LOGGER.error(self.result)
-                        
+
                     except requests.exceptions.RequestException as e:
                         self.result = f'Unable to get credentials response.\n{e}'
                         _LOGGER.error(self.result)
- 
+
                 except requests.exceptions.RequestException as e:
                     self.result = f'Unable to send login request.\n{e}'
                     _LOGGER.error(self.result)
-                    
+
             else:
                 self.result = f'Could not parse verification token and session parameters from response.'
                 _LOGGER.error(self.result)
@@ -344,5 +343,5 @@ class GreenchoiceApiData:
         except requests.exceptions.RequestException as e:
             self.result = f'Could not start session.\n{e}'
             _LOGGER.error(self.result)
-        
+
         session.close()
